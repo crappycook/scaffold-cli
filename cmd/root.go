@@ -6,9 +6,9 @@ import (
 )
 
 var CmdRoot = &cobra.Command{
-	Use:     "scaffold",
-	Example: "scaffold new project",
-	Short:   "build new project from your layout",
+	Use:     "scaffold-cli",
+	Example: "scaffold-cli new project",
+	Short:   "Build new project from your layout",
 }
 
 func init() {

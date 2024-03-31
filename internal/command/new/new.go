@@ -15,14 +15,15 @@ import (
 )
 
 type Project struct {
-	ProjectName string `survey:"name"`
+	ModuleName string `survey:"name"`
+	Dirname    string
 }
 
 var CmdNew = &cobra.Command{
 	Use:     "new",
-	Example: "scaffold new demo",
-	Short:   "create a new project.",
-	Long:    `create a new project with your template repo layout.`,
+	Example: "scaffold-cli new demo",
+	Short:   "Create a new project.",
+	Long:    `Create a new project from your template repo layout.`,
 	Run:     run,
 }
 
@@ -45,13 +46,16 @@ func run(cmd *cobra.Command, args []string) {
 			Message: "Input your module name: ",
 			Help:    "module name like github.com/gin-gonic/gin",
 			Suggest: nil,
-		}, &p.ProjectName, survey.WithValidator(survey.Required))
+		}, &p.ModuleName, survey.WithValidator(survey.Required))
 		if err != nil {
 			return
 		}
 	} else {
-		p.ProjectName = args[0]
+		p.ModuleName = args[0]
 	}
+
+	strArr := strings.Split(p.ModuleName, "/")
+	p.Dirname = strArr[len(strArr)-1]
 
 	// clone repo
 	yes, err := p.cloneTemplate()
@@ -69,18 +73,20 @@ func run(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	p.rmGit()
+	p.rmTemplateGit()
 
-	fmt.Printf("🎉 Project \u001B[36m%s\u001B[0m created successfully!\n\n", p.ProjectName)
+	p.projectGitInit()
+
+	fmt.Printf("🎉 Project \u001B[36m%s\u001B[0m created successfully!\n\n", p.ModuleName)
 }
 
 func (p *Project) cloneTemplate() (bool, error) {
-	stat, _ := os.Stat(p.ProjectName)
+	stat, _ := os.Stat(p.Dirname)
 	if stat != nil {
 		var overwrite = false
 
 		prompt := &survey.Confirm{
-			Message: fmt.Sprintf("Folder %s already exists, do you want to overwrite it?", p.ProjectName),
+			Message: fmt.Sprintf("Folder %s already exists, do you want to overwrite it?", p.Dirname),
 			Help:    "Remove old project and create new project.",
 		}
 		err := survey.AskOne(prompt, &overwrite)
@@ -90,23 +96,20 @@ func (p *Project) cloneTemplate() (bool, error) {
 		if !overwrite {
 			return false, nil
 		}
-		err = os.RemoveAll(p.ProjectName)
+		err = os.RemoveAll(p.Dirname)
 		if err != nil {
 			fmt.Println("remove old project error: ", err)
 			return false, err
 		}
 	}
 
-	// TODO
 	repo := repoURL
 	if len(repoURL) == 0 {
 		repo = config.DefaultRepoURL
 	}
 
 	fmt.Printf("git clone %s\n", repo)
-	strArr := strings.Split(p.ProjectName, "/")
-	dirName := strArr[len(strArr)-1]
-	cmd := exec.Command("git", "clone", repo, dirName)
+	cmd := exec.Command("git", "clone", repo, p.Dirname)
 	_, err := cmd.CombinedOutput()
 	if err != nil {
 		fmt.Printf("git clone %s error: %s\n", repo, err)
@@ -116,15 +119,15 @@ func (p *Project) cloneTemplate() (bool, error) {
 }
 
 func (p *Project) replacePackageName() error {
-	packageName := utils.GetProjectName(p.ProjectName)
+	packageName := utils.GetProjectName(p.Dirname)
 
 	err := p.replaceFiles(packageName)
 	if err != nil {
 		return err
 	}
 
-	cmd := exec.Command("go", "mod", "edit", "-module", p.ProjectName)
-	cmd.Dir = p.ProjectName
+	cmd := exec.Command("go", "mod", "edit", "-module", p.ModuleName)
+	cmd.Dir = p.Dirname
 	_, err = cmd.CombinedOutput()
 	if err != nil {
 		fmt.Println("go mod edit error: ", err)
@@ -136,7 +139,7 @@ func (p *Project) replacePackageName() error {
 func (p *Project) modTidy() error {
 	fmt.Println("go mod tidy")
 	cmd := exec.Command("go", "mod", "tidy")
-	cmd.Dir = p.ProjectName
+	cmd.Dir = p.Dirname
 	if err := cmd.Run(); err != nil {
 		fmt.Println("go mod tidy error: ", err)
 		return err
@@ -144,12 +147,20 @@ func (p *Project) modTidy() error {
 	return nil
 }
 
-func (p *Project) rmGit() {
-	os.RemoveAll(p.ProjectName + "/.git")
+func (p *Project) rmTemplateGit() {
+	os.RemoveAll(p.Dirname + "/.git")
+}
+
+func (p *Project) projectGitInit() {
+	cmd := exec.Command("git", "init")
+	cmd.Dir = p.Dirname
+	if err := cmd.Run(); err != nil {
+		fmt.Println("git init error: ", err)
+	}
 }
 
 func (p *Project) replaceFiles(packageName string) error {
-	err := filepath.Walk(p.ProjectName, func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(p.Dirname, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -163,7 +174,7 @@ func (p *Project) replaceFiles(packageName string) error {
 		if err != nil {
 			return err
 		}
-		newData := bytes.ReplaceAll(data, []byte(packageName), []byte(p.ProjectName))
+		newData := bytes.ReplaceAll(data, []byte(packageName), []byte(p.ModuleName))
 		if err := os.WriteFile(path, newData, 0644); err != nil {
 			return err
 		}
